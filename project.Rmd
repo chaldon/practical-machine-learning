@@ -1,0 +1,79 @@
+```{r setup, cache = F, echo = F, message = F, warning = F, tidy = F}
+# make this an external chunk that can be included in any file
+options(width = 100)
+opts_chunk$set(message = F, error = F, warning = F, comment = NA, fig.align = 'center', dpi = 100, tidy = F, cache.path = '.cache/', fig.path = 'fig/')
+
+options(xtable.type = 'html')
+knit_hooks$set(inline = function(x) {
+  if(is.numeric(x)) {
+    round(x, getOption('digits'))
+  } else {
+    paste(as.character(x), collapse = ', ')
+  }
+})
+knit_hooks$set(plot = knitr:::hook_plot_html)
+```
+## Practical Machine Learning Project
+
+A. Shchelokov, `r Sys.time()`
+
+The task is to build a predictive model using quantitive data from various sensors attached to a body of athlete during an exercise. The model should infer "classe" of exercise. "classe"s attached to source data fall to one of categories "A","B","C","D" or "E".
+The following steps was done to build model:
+
+Perform libraries load, pseudo-random generator initialization.
+
+```{r init}
+library(caret); library(doParallel);
+set.seed(1421979345)
+```
+Read data while performing some data cleanup. More specifically - replace "NA", "#DIV/0!" and empty string to R's NA values.
+```{r read_data}
+train <- read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!", ""));
+test <- read.csv("pml-testing.csv"); 
+```
+Split to a train(75%) and validation(25%) sets. It's different from "rule of thumb - 60%/40%" recommendation because I want more data in training set.
+```{r}
+inTrain <- createDataPartition( y=train$classe, p=0.75, list = FALSE);
+```
+I observed a list of variables presentred in pml-testing.csv and do a manual selection of columns which I want to use for prediction (non-empty varaibles, some houskeeping variables like user name, time stamp was removed).
+```{r}
+para <- c("classe", "roll_belt","pitch_belt","yaw_belt","total_accel_belt","gyros_belt_x","gyros_belt_y","gyros_belt_z","accel_belt_x","accel_belt_y","accel_belt_z","magnet_belt_x","magnet_belt_y","magnet_belt_z","roll_arm","pitch_arm","yaw_arm","total_accel_arm","gyros_arm_x","gyros_arm_y","gyros_arm_z","accel_arm_x","accel_arm_y","accel_arm_z","magnet_arm_x","magnet_arm_y","magnet_arm_z","roll_dumbbell","pitch_dumbbell","yaw_dumbbell","total_accel_dumbbell","gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z","accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z","magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z","roll_forearm","pitch_forearm","yaw_forearm","total_accel_forearm","gyros_forearm_x","gyros_forearm_y","gyros_forearm_z","accel_forearm_x","accel_forearm_y","accel_forearm_z","magnet_forearm_x","magnet_forearm_y","magnet_forearm_z");
+```
+Caret package support multiple algorithms for classification task, Random Forest is good option to test what we can get from the data before trying sometning else.
+So, train model using random forest (in parallel, using advantage of modern multicore processors).
+```{r train_model}
+Sys.time()
+cl <- makeCluster(detectCores());
+registerDoParallel(cl);
+
+model <- train(classe~., data=train[inTrain,para], method="rf", prox=FALSE);
+
+stopCluster(cl)
+Sys.time()
+```
+Few charactreristics of trained model.
+```{r}
+model
+``` 
+Save it in case I want to play with it later.
+```{r}
+save(model,file = "model.RData")
+``` 
+Test solution against validation set.
+```{r}
+conf <- confusionMatrix(train[-inTrain,"classe"],predict(model,train[-inTrain,para]));
+conf;
+```
+Obserwing Accuracy = `r conf$overall[1]` we can conclude that model is quite good and expected out of sample errors will be quite low.
+
+Generate data for submission.
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(predict(model,test[,para[-1]]))
+```
